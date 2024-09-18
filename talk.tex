@@ -1,0 +1,180 @@
+% !TeX program = xelatex
+
+\documentclass[8pt, aspectratio=169]{beamer}
+
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{minted}
+\usepackage{multicol}
+\usepackage{unicode-math}
+
+\setlength{\columnsep}{0pt}
+
+\usemintedstyle{monokai}
+\setminted{autogobble}
+\setminted{baselinestretch=1.0}
+\newminted{rust}{}
+\newmintinline{rust}{}
+
+\title{Architecting Native Extension Modules for Python}
+\author{Alex Steele}
+\date{September 21, 2024}
+\institute{PyBay 2024}
+
+\usetheme[progressbar=frametitle]{metropolis}
+
+\setmonofont{CMU Typewriter Text}
+
+\definecolor{VividCerulean}{HTML}{009de0}  
+\definecolor{MaastrichtBlue}{HTML}{011936}
+\definecolor{BlueSapphire}{HTML}{19647e}
+\definecolor{DarkSlate}{HTML}{204B57}
+\definecolor{MidnightBlue}{HTML}{1b3b6f}
+\definecolor{SpaceCadet}{HTML}{21295c}
+\definecolor{DutchWhite}{HTML}{a4c2a5}
+\definecolor{Box1}{HTML}{432e36}
+\definecolor{Box2}{HTML}{260c1a}
+\definecolor{Alert1}{HTML}{e55829}
+\definecolor{Alert2}{HTML}{bc4622 }
+\definecolor{Example1}{HTML}{2f9c95}
+\definecolor{Example2}{HTML}{3f3f3f}%{21706b}
+\definecolor{CodeBG}{HTML}{131515}
+\definecolor{CodeFG}{HTML}{2b2c28}
+\definecolor{BackgroundColor}{HTML}{191919}
+
+\setbeamercolor{frametitle}{bg=BackgroundColor, fg=white}
+\setbeamercolor{frame}{bg=BackgroundColor, fg=white}
+\setbeamercolor{progress bar}{fg=VividCerulean, bg=SpaceCadet}
+\setbeamercolor{background canvas}{bg=BackgroundColor, fg=white}
+\setbeamercolor{palette primary}{fg=white, bg=SpaceCadet}
+\setbeamercolor{normal text}{fg=white, bg=SpaceCadet} 
+\setbeamercolor{block title}{fg=white, bg=Alert1}
+\setbeamercolor{block body}{fg=white, bg=Alert2}
+\setbeamercolor{block title alerted}{fg=white, bg=Alert1}
+\setbeamercolor{block body alerted}{fg=white, bg=Alert2}
+\setbeamercolor{block title example}{fg=white, bg=Example1}
+\setbeamercolor{block body example}{fg=white, bg=Example2}
+\setbeamercolor{alerted text}{fg=VividCerulean}
+\setbeamercolor{itemize item}{fg=white}
+
+\metroset{block=fill}
+
+% Extremely cursed hack to get the modulo operator in a \mintinline.
+% https://tex.stackexchange.com/questions/331695
+\ExplSyntaxOn
+\NewDocumentCommand{\mintedstring}{mv}
+ {
+  \tl_clear_new:c { l_minted_string_#1_tl }
+  \tl_set:cn { l_minted_string_#1_tl } { #2 }
+ }
+\NewDocumentCommand{\mintinlinestring}{mm}
+ {
+  \minted_inline_string:nv { #1 } { l_minted_string_#2_tl }
+ }
+\cs_new_protected:Nn \minted_inline_string:nn
+ {
+  \mintinline{#1}{#2}
+ }
+\cs_generate_variant:Nn \minted_inline_string:nn { nv }
+\ExplSyntaxOff
+
+\setbeamertemplate{footline}
+{
+  \leavevmode%
+  \hbox{%
+  \begin{beamercolorbox}[wd=.3\paperwidth,ht=2.25ex,dp=1ex,center]{frametitle}%
+    \usebeamerfont{author in head/foot}\insertshortauthor \ (\insertshortinstitute)
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=.47\paperwidth,ht=2.25ex,dp=1ex,center]{frametitle}%
+    \usebeamerfont{title in head/foot}\insertshorttitle\hspace*{3em}
+  \end{beamercolorbox}}%
+  \begin{beamercolorbox}[wd=.23\paperwidth,ht=2.25ex,dp=1ex,center]{frametitle}%    
+    \insertframenumber{} \hspace*{1ex}
+  \end{beamercolorbox}%
+  \vskip0pt%
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{frame}{Background}
+\begin{definition}[Native Extension Module]
+A Python module that is written in a language that compiles to native code and exposes new ``built-in'' objects to the interpreter.
+\end{definition}
+\begin{itemize}
+\item NumPy, SciPy, pandas, PyTorch, Pydantic, Polars, and Pillow all use native extensions for some of their functionality.
+\item The classic way to make an extension module is the Python API for C, but several high-level frameworks now exist for creating extension modules.
+\begin{itemize}
+\item Boost.Python and pybind11 for C++.
+\item PyO3 for Rust.
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Decisions}
+\begin{itemize}
+\item Native extensions are great.
+\begin{itemize}
+\item Avoid re-inventing the wheel.
+\item Drastically improve performance.
+\item Interact with hardware and low-level systems.
+\end{itemize}
+\item But:
+\begin{itemize}
+\item System complexity increases.
+\item Portability is often a challenge.
+\item Tooling is annoying.
+\end{itemize}
+\item Ensure that this is a trade-off you and your team are willing to make.
+\begin{itemize}
+\item ``Why do we need Python \emph{and} C++?''
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Performance}
+\begin{itemize}
+\item Calls and type conversions across the foreign function interface (FFI) are expensive. Make them as infrequent as possible.
+\begin{itemize}
+\item Don't feel obligated to copy your C/C++/Rust API.
+\item Use context managers.
+\item Batch operations.
+\end{itemize}
+\item The global interpreter lock (GIL) is easier to work around in native code. Parallelize if it makes sense.
+\item As always, write benchmarks and profile them to find hot points in your code.
+\begin{itemize}
+\item \rustinline|py-spy| is a sampling profiler that supports native extensions.
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Architecture}
+\begin{itemize}
+\item Dealing with Python FFI should be a separate concern from the business logic of your library.
+\begin{itemize}
+\item Making your core native library and your Python bindings into separate packages can help enforce this.
+\end{itemize}
+\item Your extension module API should be written with Python users in mind.
+\begin{itemize}
+\item Much of the power of Python lies in its simplicity and accessibility. Don't make users write C++ in Python.
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\begin{itemize}
+\item Only use a native extension if you're getting value from both Python and a natively-compiled language.
+\item FFI calls are expensive, minimize if possible.
+\item You're still writing a Python module. Make it accessible to Python users.
+\end{itemize}
+\end{frame}
+
+{
+\setbeamertemplate{footline}{}
+\begin{frame}[standout]
+Thank you!
+\end{frame}
+}
+
+\end{document}
